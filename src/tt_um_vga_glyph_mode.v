@@ -28,8 +28,8 @@ module tt_um_vga_glyph_mode(
 );
 
   // ---------------------------------------------------------------- tunables
-  localparam NB           = 16;   // bullet slots; enough for continuous fire
-  localparam NE           = 12;   // maximum simultaneous enemies
+  localparam NB           = 3;    // REDUCED: bullet slots (to fit 1x1 tile)
+  localparam NE           = 3;    // REDUCED: maximum simultaneous enemies (to fit 1x1 tile)
   localparam START_HP     = 5;
   localparam LEVEL_FRAMES = 240;  // frames per difficulty level (~4 s at 60 Hz)
   localparam FIRE_FRAMES  = 3;    // same rapid fire cadence as the original (~20 shots/sec)
@@ -47,7 +47,7 @@ module tt_um_vga_glyph_mode(
 
   hvsync_generator hvsync_gen(
     .clk(clk), .reset(~rst_n),
-    .mode(2'b00),                  // <--- ADD THIS LINE
+    .mode(2'b00),                  // FIX: Added mode to turn screen on
     .hsync(hsync), .vsync(vsync), .display_on(video_active),
     .hpos(pix_x), .vpos(pix_y)
   );
@@ -115,13 +115,8 @@ module tt_um_vga_glyph_mode(
   always @(posedge clk)
     lfsr <= ~rst_n ? 16'hACE1 : {lfsr[14:0], lfsr[15] ^ lfsr[13] ^ lfsr[12] ^ lfsr[10]};
 
-  // Active enemy count grows gradually: 2 -> 4 -> 6 -> 8 -> 10 -> 12.
-  // sp_idx is wrapped explicitly, avoiding modulo/division hardware.
-  wire [3:0] active_enemies = (level == 3'd0) ? 4'd2 :
-                              (level == 3'd1) ? 4'd4 :
-                              (level == 3'd2) ? 4'd6 :
-                              (level == 3'd3) ? 4'd8 :
-                              (level == 3'd4) ? 4'd10 : 4'd12;
+  // FIX: Cap active enemies to NE (3) so the array doesn't overflow
+  wire [3:0] active_enemies = (level == 3'd0) ? 4'd2 : 4'd3;
   wire [3:0] slot = sp_idx;
 
   // speed by enemy type and level
@@ -140,7 +135,6 @@ module tt_um_vga_glyph_mode(
   wire [1:0] sd = lfsr[13:12]; // 0=top, 1=bottom, 2=left, 3=right
 
   // Flying targets become more common as difficulty rises.
-  // Level 0-1: no birds, level 2+: roughly 50% chance of a bird.
   wire [1:0] st = (level < 3'd2) ? lfsr[11:10] :
                   (lfsr[11] ? 2'd3 : lfsr[10:9]);
 
@@ -172,15 +166,12 @@ module tt_um_vga_glyph_mode(
         // timers
         if (inv != 0) inv <= inv - 6'd1;
 
-        // Controlled auto-fire. The bullet pool still hard-caps the
-        // number of bullets on screen, preventing an unlimited stream.
         if (fire_t == FIRE_FRAMES - 1)
           fire_t <= 0;
         else
           fire_t <= fire_t + 1'd1;
 
-        // Spawn interval: 42 -> 36 -> 30 -> 24 -> 18 -> 12 -> 9 -> 7.
-        // Difficulty increases both enemy count and pressure.
+        // Spawn interval
         if (spawn_t == 0) begin
           case (level)
             3'd0: spawn_t <= 6'd42;
@@ -203,10 +194,6 @@ module tt_um_vga_glyph_mode(
           end
 
         // Continuous auto-fire.
-        // The cadence and bullet movement speed are unchanged from the
-        // original: one shot every 3 frames, bullet speed = 14 px/frame.
-        // A larger pool prevents the stream from stopping when older
-        // bullets are still travelling upward.
         if (fire_t == FIRE_FRAMES - 1) begin
           if (fb_idx == NB-1)
             fb_idx <= 0;
@@ -256,7 +243,6 @@ module tt_um_vga_glyph_mode(
           end
 
         // Spawn from a random edge into the next active slot.
-        // When the active enemy count grows, more slots become available.
         if (spawn_t == 0) begin
           if (sp_idx >= active_enemies - 1)
             sp_idx <= 0;
@@ -274,8 +260,6 @@ module tt_um_vga_glyph_mode(
         end
 
         // collisions
-        // The invulnerability timer guarantees that only one player hit can
-        // reduce HP during a recovery period.
         for (j = 0; j < NE; j = j + 1)
           if (e_on[j]) begin
             if (px < ex[j] + 10'd16 && ex[j] < px + 10'd16 &&
@@ -287,8 +271,6 @@ module tt_um_vga_glyph_mode(
               end
             end
 
-            // One bullet hit consumes one bullet. Shielded enemies first
-            // lose armor, then require another hit.
             for (i = 0; i < NB; i = i + 1)
               if (b_on[i] &&
                   bx[i] < ex[j] + 10'd16 && ex[j] < bx[i] + 10'd4 &&
@@ -305,8 +287,6 @@ module tt_um_vga_glyph_mode(
   end
 
   // ---------------------------------------------------------------- per-line sprite flags
-  // Vertical tests are done once per scanline (in the blanking area), so the per-pixel
-  // renderer only needs one horizontal compare per sprite. This is what keeps the FPS up.
   wire [9:0] nl = (pix_y == 10'd524) ? 10'd0 : pix_y + 10'd1;   // next visible line
   reg [NE-1:0] e_line;
   reg [3:0]    elr [0:NE-1];
