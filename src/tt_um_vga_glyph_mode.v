@@ -47,6 +47,7 @@ module tt_um_vga_glyph_mode(
 
   hvsync_generator hvsync_gen(
     .clk(clk), .reset(~rst_n),
+    .mode(2'b00),                  // <--- ADD THIS LINE
     .hsync(hsync), .vsync(vsync), .display_on(video_active),
     .hpos(pix_x), .vpos(pix_y)
   );
