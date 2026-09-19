@@ -85,7 +85,7 @@ module tt_um_vga_glyph_mode(
   reg [5:0]  inv, spawn_t;
   reg [3:0]  fire_t;
   reg [8:0]  over_t;
-  reg [9:0]  lvl_t, scroll;
+  reg [9:0]  lvl_t;
   reg [15:0] lfsr;
 
   // Single bullet register
@@ -93,7 +93,7 @@ module tt_um_vga_glyph_mode(
   reg [9:0]  bx;
   reg [9:0]  by;
 
-  // Single enemy register (Simplified)
+  // Single enemy register
   reg        e_on;
   reg [9:0]  ex;
   reg [9:0]  ey;
@@ -104,16 +104,16 @@ module tt_um_vga_glyph_mode(
   always @(posedge clk)
     lfsr <= ~rst_n ? 16'hACE1 : {lfsr[14:0], lfsr[15] ^ lfsr[13] ^ lfsr[12] ^ lfsr[10]};
 
-  wire [9:0] rx = (lfsr[9:0]  > 10'd623) ? lfsr[9:0]  - 10'd400 : lfsr[9:0];
+  // Simplified Random X Spawn (Removes Subtractor)
+  wire [9:0] rx = {1'b0, lfsr[8:0]};
 
   always @(posedge clk) begin
     if (game_rst) begin
       px <= 10'd312; py <= 10'd440;
       hp <= START_HP; level <= 0; inv <= 0;
-      lvl_t <= 0; fire_t <= 0; spawn_t <= 6'd48; over_t <= 0; scroll <= 0;
+      lvl_t <= 0; fire_t <= 0; spawn_t <= 6'd48; over_t <= 0;
       b_on <= 0; e_on <= 0;
     end else if (frame_tick) begin
-      scroll <= scroll + 10'd1;
 
       if (game_over) over_t <= over_t + 9'd1;
       else begin
@@ -155,7 +155,7 @@ module tt_um_vga_glyph_mode(
           else ey <= ey + 10'd2 + level;
         end
 
-        // Enemy spawn (Always spawns at the top now)
+        // Enemy spawn
         if (spawn_t == 0) begin
           if (!e_on) begin
             e_on    <= 1;
@@ -212,15 +212,12 @@ module tt_um_vga_glyph_mode(
     endcase
   endfunction
 
-  wire [9:0] sy   = pix_y - scroll;
-  wire       star = (pix_x[6:0] == {sy[5:3], sy[9:6]}) && sy[2:0] == 0 && pix_x[2];
-
   reg [9:0]  lx;
   reg [63:0] bm;
 
   always @* begin
     lx = 0; bm = 0;
-    rgb = star ? 6'b01_01_01 : 6'b00_00_00;
+    rgb = 6'b00_00_00; // Background is now solid black to save hardware gates
 
     // Enemy rendering
     lx = pix_x - ex;
@@ -246,7 +243,7 @@ module tt_um_vga_glyph_mode(
 
     // Minimal Game Over (Flashing Screen)
     if (game_over) begin
-      if (scroll[4] && (pix_x < 8 || pix_x >= 632 || pix_y < 8 || pix_y >= 472)) rgb = 6'b11_00_00;
+      if (lfsr[12] && (pix_x < 8 || pix_x >= 632 || pix_y < 8 || pix_y >= 472)) rgb = 6'b11_00_00;
     end
   end
 
